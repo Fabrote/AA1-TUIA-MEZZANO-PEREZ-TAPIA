@@ -38,7 +38,7 @@ def build_model(n_features):
 n_features = len(final_columns)
 model = build_model(n_features)
 # La ruta al modelo guardado. Asumimos que está en el directorio raíz del proyecto.
-model_path = os.path.join(BASE_DIR, '..', 'mejor_modelo_keras.h5')
+model_path = os.path.join(BASE_DIR, 'mejor_modelo_keras.h5')
 if os.path.exists(model_path):
     model.load_weights(model_path)
 else:
@@ -127,7 +127,7 @@ def predict(input_json: str) -> dict:
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 1 and sys.argv[1]:
         # Si se pasa un argumento, se interpreta como el string JSON
         json_input = sys.argv[1]
     else:

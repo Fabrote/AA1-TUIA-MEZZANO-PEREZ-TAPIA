@@ -5,6 +5,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 import joblib
 import os
+from sklearn.utils.class_weight import compute_class_weight
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
 
 print("Iniciando el guardado de artefactos de preprocesamiento (versión corregida)...")
 
@@ -14,7 +19,7 @@ os.makedirs(output_dir, exist_ok=True)
 print(f"Directorio '{output_dir}' asegurado.")
 
 # --- 2. Carga y preparación inicial de datos (replicando el notebook) ---
-df = pd.read_csv('weatherAUS.csv')
+df = pd.read_csv(r'C:\\Users\\Usuario\\OneDrive\\Documentos\\TUIA\\4to Cuatri\\AA1\\TP2-Clasificación\\weatherAUS.csv')
 
 # Mapeo pre-calculado de Ciudad a NRM_label
 city_to_nrm = {
@@ -132,4 +137,56 @@ print("Artefacto 'scaler.pkl' guardado.")
 joblib.dump(final_columns, os.path.join(output_dir, 'final_columns.pkl'))
 print("Artefacto 'final_columns.pkl' guardado.")
 
-print("\nProceso corregido completado. Los artefactos ahora coinciden con la lógica de tu modelo.")
+
+# --- 7. Entrenamiento y guardado del modelo de Red Neuronal ---
+print("\nIniciando el entrenamiento del modelo de red neuronal...")
+
+
+# Escalar los datos de entrenamiento que ya fueron procesados
+X_train_scaled = scaler.transform(X_train_final)
+
+# Configuración y compilación del modelo
+tf.random.set_seed(42)
+np.random.seed(42)
+
+n_features = X_train_scaled.shape[1]
+
+model = Sequential([
+    Dense(64, activation='relu', input_shape=(n_features,)),
+    Dense(32, activation='relu'),
+    Dropout(0.3),
+    Dense(1, activation='sigmoid')  
+])
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+    loss='binary_crossentropy',
+    metrics=['accuracy', tf.keras.metrics.AUC(name='auc')]
+)
+
+# Callbacks y class weights
+early_stop = EarlyStopping(
+    monitor='val_loss',
+    patience=10,
+    restore_best_weights=True
+)
+
+y_train_int = y_train.astype(int)
+clases = np.unique(y_train_int)
+pesos = compute_class_weight(class_weight='balanced', classes=clases, y=y_train_int)
+class_weight = {int(clases[i]): pesos[i] for i in range(len(clases))}
+
+# Entrenamiento
+history = model.fit(
+    X_train_scaled, y_train_int,
+    validation_split=0.2,  
+    epochs=100,
+    batch_size=32,
+    callbacks=[early_stop],
+    class_weight=class_weight,
+    verbose=1               
+)
+
+# Guardar el modelo en el directorio raíz
+model.save('mejor_modelo_keras.h5')
+print("\nModelo de red neuronal entrenado y guardado como 'mejor_modelo_keras.h5' en el directorio raíz.")
