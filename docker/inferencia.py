@@ -7,7 +7,7 @@ from tensorflow.keras.layers import Dense, Dropout
 import json
 import os
 
-# --- 1. Cargar artefactos de preprocesamiento y modelo ---
+# Cargar artefactos de preprocesamiento y modelo ---
 
 # Obtener la ruta del directorio actual del script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +19,7 @@ grouped_modes = joblib.load(os.path.join(BASE_DIR, 'grouped_modes.pkl'))
 scaler = joblib.load(os.path.join(BASE_DIR, 'scaler.pkl'))
 final_columns = joblib.load(os.path.join(BASE_DIR, 'final_columns.pkl'))
 
-# --- 2. Definir y cargar el modelo Keras ---
+# Definir y cargar el modelo Keras ---
 
 def build_model(n_features):
     """
@@ -45,7 +45,7 @@ else:
     raise FileNotFoundError(f"El archivo del modelo no se encontró en la ruta: {model_path}")
 
 
-# --- 3. Función de preprocesamiento ---
+# Función de preprocesamiento ---
 
 def preprocess_input(data: pd.DataFrame) -> pd.DataFrame:
     """
@@ -53,12 +53,12 @@ def preprocess_input(data: pd.DataFrame) -> pd.DataFrame:
     """
     df = data.copy()
 
-    # 1. Mapeo de NRM_label
+    # Mapeo de NRM_label
     df['NRM_label'] = df['Location'].map(city_to_nrm)
     if df['NRM_label'].isnull().any():
         raise ValueError("Se encontró una 'Location' no válida o no mapeada.")
 
-    # 2. Imputación de valores faltantes
+    # Imputación de valores faltantes
     df.loc[df['Evaporation'] > 60, 'Evaporation'] = np.nan
     
     numeric_cols = grouped_medians.columns
@@ -74,7 +74,7 @@ def preprocess_input(data: pd.DataFrame) -> pd.DataFrame:
     df.loc[df["RainToday"].isna(), "RainToday"] = 0
     df['RainToday'] = df['RainToday'].map({'Yes': 1, 'No': 0, 1: 1, 0: 0}).astype('Int64')
 
-    # 3. Codificación Cíclica
+    # Codificación Cíclica
     df['Date'] = pd.to_datetime(df['Date'])
     df['Month'] = df['Date'].dt.month
     df['Month_sin'] = np.sin(2 * np.pi * df['Month'] / 12)
@@ -85,22 +85,22 @@ def preprocess_input(data: pd.DataFrame) -> pd.DataFrame:
         df[f'{col}_sin'] = np.sin(np.deg2rad(df[col].map(wind_dir_to_deg)))
         df[f'{col}_cos'] = np.cos(np.deg2rad(df[col].map(wind_dir_to_deg)))
         
-    # 4. One-Hot Encoding para NRM_label
+    # One-Hot Encoding para NRM_label
     df = pd.get_dummies(df, columns=['NRM_label'], drop_first=True, dtype=int)
 
-    # 5. Alinear columnas con las del entrenamiento
+    # Alinear columnas con las del entrenamiento
     for col in final_columns:
         if col not in df.columns:
             df[col] = 0
     
     df_final = df[final_columns].astype('float64')
     
-    # 6. Escalar los datos
+    # Escalar los datos
     scaled_data = scaler.transform(df_final)
     
     return scaled_data
 
-# --- 4. Función de predicción ---
+# Función de predicción ---
 
 def predict(input_json: str) -> dict:
     """
@@ -123,7 +123,7 @@ def predict(input_json: str) -> dict:
         "prediction_rain_tomorrow": "Yes" if prediction == 1 else "No"
     }
 
-# --- 5. Bloque principal para ejecución desde CLI ---
+# Bloque principal para ejecución desde CLI ---
 
 if __name__ == '__main__':
     import sys
