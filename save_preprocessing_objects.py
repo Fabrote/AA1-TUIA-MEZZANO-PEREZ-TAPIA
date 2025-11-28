@@ -13,12 +13,12 @@ from tensorflow.keras.callbacks import EarlyStopping
 
 print("Iniciando el guardado de artefactos de preprocesamiento (versión corregida)...")
 
-# --- 1. Directorio de salida ---
+# Directorio de salida ---
 output_dir = 'docker'
 os.makedirs(output_dir, exist_ok=True)
 print(f"Directorio '{output_dir}' asegurado.")
 
-# --- 2. Carga y preparación inicial de datos (replicando el notebook) ---
+# Carga y preparación inicial de datos (replicando el notebook) ---
 df = pd.read_csv(r'C:\\Users\\Usuario\\OneDrive\\Documentos\\TUIA\\4to Cuatri\\AA1\\TP2-Clasificación\\weatherAUS.csv')
 
 # Mapeo pre-calculado de Ciudad a NRM_label
@@ -57,7 +57,7 @@ df['RainToday'] = df['RainToday'].map({'Yes': 1, 'No': 0})
 df['RainTomorrow'] = df['RainTomorrow'].map({'Yes': 1, 'No': 0})
 df['RainToday'] = df['RainToday'].astype('Int64')
 
-# --- 3. División de datos EXACTA a la del notebook ---
+# División de datos EXACTA a la del notebook ---
 X = df.drop(columns='RainTomorrow')
 y = df['RainTomorrow']
 X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -65,7 +65,7 @@ X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.
 X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.125, random_state=42)
 print("Datos divididos replicando la lógica del notebook.")
 
-# --- 4. Cálculo y guardado de artefactos de imputación sobre el X_train correcto ---
+# Cálculo y guardado de artefactos de imputación sobre el X_train correcto ---
 # Mediana para variables numéricas
 numeric_cols = ['MinTemp','MaxTemp','Temp9am','Temp3pm', 'Humidity9am','Humidity3pm', 'Pressure9am','Pressure3pm', 'Rainfall', 'WindGustSpeed','WindSpeed9am','WindSpeed3pm', 'Sunshine','Evaporation', 'Cloud9am','Cloud3pm']
 medianas_por_grupo = X_train.groupby('NRM_label')[numeric_cols].median()
@@ -78,11 +78,11 @@ modas_por_grupo = X_train.groupby('NRM_label')[cols_viento].agg(lambda x: x.mode
 joblib.dump(modas_por_grupo, os.path.join(output_dir, 'grouped_modes.pkl'))
 print("Artefacto 'grouped_modes.pkl' guardado.")
 
-# --- 5. Preparar datos de entrenamiento para ajustar el Scaler ---
+# Preparar datos de entrenamiento para ajustar el Scaler ---
 X_train_processed = X_train.copy()
 X_train_processed.loc[X_train_processed['Evaporation'] > 60, 'Evaporation'] = np.nan
 
-# A. Imputación
+# Imputación
 for col in numeric_cols:
     X_train_processed[col] = X_train_processed[col].fillna(X_train_processed['NRM_label'].map(medianas_por_grupo[col]))
 for col in cols_viento:
@@ -90,7 +90,7 @@ for col in cols_viento:
 X_train_processed.loc[X_train_processed["RainToday"].isna() & (X_train_processed["Rainfall"] >= 1), "RainToday"] = 1
 X_train_processed.loc[X_train_processed["RainToday"].isna(), "RainToday"] = 0
 
-# B. Codificación Cíclica
+# Codificación Cíclica
 wind_dir_to_deg = {'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5, 'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5, 'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5, 'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5}
 for col in cols_viento:
     X_train_processed[f'{col}_sin'] = np.sin(np.deg2rad(X_train_processed[col].map(wind_dir_to_deg)))
@@ -101,14 +101,14 @@ X_train_processed['Month'] = X_train_processed['Date'].dt.month
 X_train_processed['Month_sin'] = np.sin(2 * np.pi * X_train_processed['Month'] / 12)
 X_train_processed['Month_cos'] = np.cos(2 * np.pi * X_train_processed['Month'] / 12)
 
-# C. One-Hot Encoding
+# One-Hot Encoding
 X_train_processed = pd.get_dummies(X_train_processed, columns=['NRM_label'], drop_first=True, dtype=int)
 
-# D. Eliminar columnas que no van al modelo
+# Eliminar columnas que no van al modelo
 cols_to_drop = ['Date', 'Month', 'Location', 'WindGustDir', 'WindDir9am', 'WindDir3pm', 'missing_count']
 X_train_processed.drop(columns=cols_to_drop, inplace=True)
 
-# E. Asegurar que las columnas están en el orden correcto
+# Asegurar que las columnas están en el orden correcto
 final_columns = [
     'MinTemp', 'MaxTemp', 'Rainfall', 'Evaporation', 'Sunshine', 'WindGustSpeed',
     'WindSpeed9am', 'WindSpeed3pm', 'Humidity9am', 'Humidity3pm', 'Pressure9am',
@@ -128,7 +128,7 @@ for col in final_columns:
 X_train_final = X_train_processed[final_columns].astype('float64')
 
 
-# --- 6. Ajustar y guardar Scaler y lista de columnas ---
+# Ajustar y guardar Scaler y lista de columnas
 scaler = StandardScaler()
 scaler.fit(X_train_final)
 joblib.dump(scaler, os.path.join(output_dir, 'scaler.pkl'))
@@ -138,7 +138,7 @@ joblib.dump(final_columns, os.path.join(output_dir, 'final_columns.pkl'))
 print("Artefacto 'final_columns.pkl' guardado.")
 
 
-# --- 7. Entrenamiento y guardado del modelo de Red Neuronal ---
+# Entrenamiento y guardado del modelo de Red Neuronal ---
 print("\nIniciando el entrenamiento del modelo de red neuronal...")
 
 
