@@ -16,7 +16,7 @@ Este directorio contiene los archivos necesarios para construir y ejecutar un co
 ## Requisitos
 
 - Docker instalado en su sistema.
-- El archivo `mejor_modelo_keras.h5` debe estar presente en el directorio raíz del proyecto (un nivel por encima de esta carpeta `docker`).
+- El archivo `mejor_modelo_keras.h5` debe estar presente en el directorio raíz del proyecto (un nivel por encima de esta carpeta `docker`). Esto se hace ejecutando el archivo save_preprocessing_objects.py. 
 
 ## Construcción de la Imagen de Docker
 
