@@ -17,32 +17,11 @@ grouped_modes = joblib.load(os.path.join(BASE_DIR, 'grouped_modes.pkl'))
 scaler = joblib.load(os.path.join(BASE_DIR, 'scaler.pkl'))
 final_columns = joblib.load(os.path.join(BASE_DIR, 'final_columns.pkl'))
 
-# Definir y cargar el modelo Keras
-def build_model(n_features):
-    """
-    Construye el modelo de Keras con la arquitectura especificada.
-    - Dos capas ocultas con activación ReLU.
-    - Capa de Dropout para mitigar sobreajuste.
-    - Salida sigmoide para clasificación binaria.
-    """
-    model = Sequential([
-        Dense(64, activation='relu', input_shape=(n_features,)),
-        Dense(32, activation='relu'),
-        Dropout(0.3),
-        Dense(1, activation='sigmoid')
-    ])
-    # En inferencia no es necesario compilar el modelo
-    return model
-
-# Construir el modelo y cargar los pesos
-n_features = len(final_columns)
-model = build_model(n_features)
+# Cargar el modelo completo (arquitectura + pesos)
 model_path = os.path.join(BASE_DIR, 'mejor_modelo_keras.h5')
-if os.path.exists(model_path):
-    model.load_weights(model_path)
-else:
+if not os.path.exists(model_path):
     raise FileNotFoundError(f"El archivo del modelo no se encontró en la ruta: {model_path}")
-
+model = tf.keras.models.load_model(model_path)
 
 # Función de preprocesamiento
 def preprocess_input(data: pd.DataFrame) -> pd.DataFrame:

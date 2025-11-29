@@ -11,15 +11,15 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 
-print("Iniciando el guardado de artefactos de preprocesamiento (versión corregida)...")
+print("Iniciando el guardado de preprocesamiento...")
 
-# Directorio de salida donde se guardarán todos los artefactos que usa Docker ---
+# Directorio de salida donde se guardarán todos los artefactos que usa Docker
 output_dir = 'docker'
 os.makedirs(output_dir, exist_ok=True)
 print(f"Directorio '{output_dir}' asegurado.")
 
 # Carga y preparación inicial de datos
-df = pd.read_csv(r'C:\\Users\\Usuario\\OneDrive\\Documentos\\TUIA\\4to Cuatri\\AA1\\TP2-Clasificación\\weatherAUS.csv')
+df = pd.read_csv('weatherAUS.csv')
 
 # Mapeo pre-calculado de Ciudad a regiones climáticas NRM_label
 city_to_nrm = {
@@ -62,9 +62,9 @@ df['RainToday'] = df['RainToday'].astype('Int64')
 X = df.drop(columns='RainTomorrow')
 y = df['RainTomorrow']
 # Primer split: train_full vs test (20% test, fijo)
-X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 # Segundo split: de train_full sacamos validación (12.5% de train_full = 10% del total)
-X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.125, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.125, random_state=42, stratify=y_train_full)
 print("Datos divididos replicando la lógica del notebook.")
 
 # Cálculo y guardado de artefactos de imputación sobre el X_train
@@ -114,7 +114,6 @@ cols_to_drop = ['Date', 'Month', 'Location', 'WindGustDir', 'WindDir9am', 'WindD
 X_train_processed.drop(columns=cols_to_drop, inplace=True)
 
 # Definimos el "esquema" final de columnas que usará la red neuronal
-# Para asegurar consistencia entre entrenamiento e inferencia
 final_columns = [
     'MinTemp', 'MaxTemp', 'Rainfall', 'Evaporation', 'Sunshine', 'WindGustSpeed',
     'WindSpeed9am', 'WindSpeed3pm', 'Humidity9am', 'Humidity3pm', 'Pressure9am',
@@ -127,7 +126,6 @@ final_columns = [
 ]
 
 # Si alguna región no aparece en el split de entrenamiento, get_dummies no crea esa columna
-# Acá garantizamos que todas las columnas existan para que el modelo siempre reciba el mismo esquema
 for col in final_columns:
     if col not in X_train_processed.columns:
         X_train_processed[col] = 0
@@ -145,24 +143,59 @@ joblib.dump(final_columns, os.path.join(output_dir, 'final_columns.pkl'))
 print("Artefacto 'final_columns.pkl' guardado.")
 
 
-# Entrenamiento y guardado del modelo de Red Neuronal
+# --- Preprocesamiento del conjunto de validación (X_val) ---
+# Este bloque replica los pasos hechos en X_train para asegurar consistencia
+X_val_processed = X_val.copy()
+X_val_processed.loc[X_val_processed['Evaporation'] > 60, 'Evaporation'] = np.nan
+
+# Imputación numérica por mediana de NRM_label
+for col in numeric_cols:
+    X_val_processed[col] = X_val_processed[col].fillna(X_val_processed['NRM_label'].map(medianas_por_grupo[col]))
+# Imputación categórica de viento por moda de NRM_label
+for col in cols_viento:
+    X_val_processed[col] = X_val_processed[col].fillna(X_val_processed['NRM_label'].map(modas_por_grupo[col]))
+# Imputación de RainToday faltante
+X_val_processed.loc[X_val_processed["RainToday"].isna() & (X_val_processed["Rainfall"] >= 1), "RainToday"] = 1
+X_val_processed.loc[X_val_processed["RainToday"].isna(), "RainToday"] = 0
+
+# Codificación Cíclica
+wind_dir_to_deg = {'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5, 'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5, 'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5, 'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5}
+for col in cols_viento:
+    X_val_processed[f'{col}_sin'] = np.sin(np.deg2rad(X_val_processed[col].map(wind_dir_to_deg)))
+    X_val_processed[f'{col}_cos'] = np.cos(np.deg2rad(X_val_processed[col].map(wind_dir_to_deg)))
+
+X_val_processed['Date'] = pd.to_datetime(X_val_processed['Date'])
+X_val_processed['Month'] = X_val_processed['Date'].dt.month
+X_val_processed['Month_sin'] = np.sin(2 * np.pi * X_val_processed['Month'] / 12)
+X_val_processed['Month_cos'] = np.cos(2 * np.pi * X_val_processed['Month'] / 12)
+
+# One-Hot Encoding
+X_val_processed = pd.get_dummies(X_val_processed, columns=['NRM_label'], drop_first=True, dtype=int)
+
+# Eliminar columnas
+X_val_processed.drop(columns=cols_to_drop, inplace=True)
+
+# Alinear columnas
+for col in final_columns:
+    if col not in X_val_processed.columns:
+        X_val_processed[col] = 0
+X_val_final = X_val_processed[final_columns].astype('float64')
+
+
+# --- Escalado y Entrenamiento ---
 print("\nIniciando el entrenamiento del modelo de red neuronal...")
 
-
-# Escalar los datos de entrenamiento ya procesados
+# Escalar los datos de entrenamiento y validación
 X_train_scaled = scaler.transform(X_train_final)
+X_val_scaled = scaler.transform(X_val_final)
 
 # Configuración y compilación del modelo
-# Fijamos semillas para reproducibilidad de resultados
 tf.random.set_seed(42)
 np.random.seed(42)
 
 n_features = X_train_scaled.shape[1]
 
 # Definición de la arquitectura de la red neuronal
-# - Capas densas con ReLU para capturar relaciones no lineales
-# - Dropout para reducir sobreajuste
-# - Salida sigmoide para probabilidad de lluvia (clase positiva)
 model = Sequential([
     Dense(64, activation='relu', input_shape=(n_features,)),
     Dense(32, activation='relu'),
@@ -186,6 +219,7 @@ early_stop = EarlyStopping(
 
 # Cálculo de class weights para compensar el desbalance de clases
 y_train_int = y_train.astype(int)
+y_val_int = y_val.astype(int)
 clases = np.unique(y_train_int)
 pesos = compute_class_weight(class_weight='balanced', classes=clases, y=y_train_int)
 class_weight = {int(clases[i]): pesos[i] for i in range(len(clases))}
@@ -193,7 +227,7 @@ class_weight = {int(clases[i]): pesos[i] for i in range(len(clases))}
 # Entrenamiento
 history = model.fit(
     X_train_scaled, y_train_int,
-    validation_split=0.2,  
+    validation_data=(X_val_scaled, y_val_int),
     epochs=100,
     batch_size=32,
     callbacks=[early_stop],
