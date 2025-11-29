@@ -7,23 +7,23 @@ from tensorflow.keras.layers import Dense, Dropout
 import json
 import os
 
-# Cargar artefactos de preprocesamiento y modelo ---
-
-# Obtener la ruta del directorio actual del script
+# Obtener la ruta del directorio actual para buscar los artefactos necesarios
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Cargar artefactos
+# Cargar artefactos previamente generados para preprocesamiento y predicción
 city_to_nrm = joblib.load(os.path.join(BASE_DIR, 'city_to_nrm.pkl'))
 grouped_medians = joblib.load(os.path.join(BASE_DIR, 'grouped_medians.pkl'))
 grouped_modes = joblib.load(os.path.join(BASE_DIR, 'grouped_modes.pkl'))
 scaler = joblib.load(os.path.join(BASE_DIR, 'scaler.pkl'))
 final_columns = joblib.load(os.path.join(BASE_DIR, 'final_columns.pkl'))
 
-# Definir y cargar el modelo Keras ---
-
+# Definir y cargar el modelo Keras
 def build_model(n_features):
     """
     Construye el modelo de Keras con la arquitectura especificada.
+    - Dos capas ocultas con activación ReLU.
+    - Capa de Dropout para mitigar sobreajuste.
+    - Salida sigmoide para clasificación binaria.
     """
     model = Sequential([
         Dense(64, activation='relu', input_shape=(n_features,)),
@@ -31,13 +31,12 @@ def build_model(n_features):
         Dropout(0.3),
         Dense(1, activation='sigmoid')
     ])
-    # No es necesario compilar el modelo para inferencia, solo para entrenamiento.
+    # En inferencia no es necesario compilar el modelo
     return model
 
 # Construir el modelo y cargar los pesos
 n_features = len(final_columns)
 model = build_model(n_features)
-# La ruta al modelo guardado. Asumimos que está en el directorio raíz del proyecto.
 model_path = os.path.join(BASE_DIR, 'mejor_modelo_keras.h5')
 if os.path.exists(model_path):
     model.load_weights(model_path)
@@ -45,26 +44,28 @@ else:
     raise FileNotFoundError(f"El archivo del modelo no se encontró en la ruta: {model_path}")
 
 
-# Función de preprocesamiento ---
-
+# Función de preprocesamiento
 def preprocess_input(data: pd.DataFrame) -> pd.DataFrame:
     """
-    Aplica todos los pasos de preprocesamiento a los datos de entrada.
+    Aplica el mismo preprocesamiento que se utilizó durante el entrenamiento.
+    Incluye imputación, codificación, transformación cíclica, escalado y alineación de columnas.
     """
     df = data.copy()
 
-    # Mapeo de NRM_label
+    # Mapeo de la región NRM_label según la ciudad
     df['NRM_label'] = df['Location'].map(city_to_nrm)
     if df['NRM_label'].isnull().any():
         raise ValueError("Se encontró una 'Location' no válida o no mapeada.")
 
-    # Imputación de valores faltantes
+    # Imputación de valores atípicos extremos en Evaporation
     df.loc[df['Evaporation'] > 60, 'Evaporation'] = np.nan
     
+    # Imputación de columnas numéricas con la mediana de cada región
     numeric_cols = grouped_medians.columns
     for col in numeric_cols:
         df[col] = df[col].fillna(df['NRM_label'].map(grouped_medians[col]))
 
+    # Imputación de columnas categóricas con la moda de cada región
     wind_cols = grouped_modes.columns
     for col in wind_cols:
         df[col] = df[col].fillna(df['NRM_label'].map(grouped_modes[col]))
@@ -100,11 +101,11 @@ def preprocess_input(data: pd.DataFrame) -> pd.DataFrame:
     
     return scaled_data
 
-# Función de predicción ---
-
+# Función de predicción
 def predict(input_json: str) -> dict:
     """
-    Realiza una predicción de 'RainTomorrow' a partir de un JSON de entrada.
+    Realiza una predicción binaria de 'RainTomorrow' a partir de un JSON de entrada.
+    Devuelve la probabilidad de lluvia y la clase predicha (Sí/No).
     """
     # Cargar datos de entrada
     input_data = json.loads(input_json)
@@ -123,8 +124,7 @@ def predict(input_json: str) -> dict:
         "prediction_rain_tomorrow": "Yes" if prediction == 1 else "No"
     }
 
-# Bloque principal para ejecución desde CLI ---
-
+# Bloque principal para ejecución desde CLI
 if __name__ == '__main__':
     import sys
     if len(sys.argv) > 1 and sys.argv[1]:

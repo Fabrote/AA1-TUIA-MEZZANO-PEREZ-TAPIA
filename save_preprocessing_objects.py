@@ -13,15 +13,15 @@ from tensorflow.keras.callbacks import EarlyStopping
 
 print("Iniciando el guardado de artefactos de preprocesamiento (versión corregida)...")
 
-# Directorio de salida ---
+# Directorio de salida donde se guardarán todos los artefactos que usa Docker ---
 output_dir = 'docker'
 os.makedirs(output_dir, exist_ok=True)
 print(f"Directorio '{output_dir}' asegurado.")
 
-# Carga y preparación inicial de datos (replicando el notebook) ---
+# Carga y preparación inicial de datos
 df = pd.read_csv(r'C:\\Users\\Usuario\\OneDrive\\Documentos\\TUIA\\4to Cuatri\\AA1\\TP2-Clasificación\\weatherAUS.csv')
 
-# Mapeo pre-calculado de Ciudad a NRM_label
+# Mapeo pre-calculado de Ciudad a regiones climáticas NRM_label
 city_to_nrm = {
     'Albury': 'Murray Basin', 'BadgerysCreek': 'East Coast', 'Cobar': 'Rangelands', 
     'CoffsHarbour': 'East Coast', 'Moree': 'Murray Basin', 'Newcastle': 'East Coast', 
@@ -46,9 +46,10 @@ df['NRM_label'] = df['Location'].map(city_to_nrm)
 joblib.dump(city_to_nrm, os.path.join(output_dir, 'city_to_nrm.pkl'))
 print("Artefacto 'city_to_nrm.pkl' guardado.")
 
-# Limpieza y filtrado
+# Limpieza y filtrado de filas con demasiados faltantes
 df = df.dropna(subset=['RainTomorrow']).copy()
 df['missing_count'] = df.isnull().sum(axis=1)
+# Definimos un umbral de faltantes permitidos por fila
 faltantes_permitidos = (len(df.columns.tolist()) - 7) // 2
 df = df[df['missing_count'] <= faltantes_permitidos].copy()
 
@@ -57,58 +58,63 @@ df['RainToday'] = df['RainToday'].map({'Yes': 1, 'No': 0})
 df['RainTomorrow'] = df['RainTomorrow'].map({'Yes': 1, 'No': 0})
 df['RainToday'] = df['RainToday'].astype('Int64')
 
-# División de datos EXACTA a la del notebook ---
+# División de datos
 X = df.drop(columns='RainTomorrow')
 y = df['RainTomorrow']
+# Primer split: train_full vs test (20% test, fijo)
 X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-# SEGUNDO SPLIT: Esta fue la parte que faltó replicar correctamente
+# Segundo split: de train_full sacamos validación (12.5% de train_full = 10% del total)
 X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.125, random_state=42)
 print("Datos divididos replicando la lógica del notebook.")
 
-# Cálculo y guardado de artefactos de imputación sobre el X_train correcto ---
-# Mediana para variables numéricas
+# Cálculo y guardado de artefactos de imputación sobre el X_train
+# Medianas por región para variables numéricas
 numeric_cols = ['MinTemp','MaxTemp','Temp9am','Temp3pm', 'Humidity9am','Humidity3pm', 'Pressure9am','Pressure3pm', 'Rainfall', 'WindGustSpeed','WindSpeed9am','WindSpeed3pm', 'Sunshine','Evaporation', 'Cloud9am','Cloud3pm']
 medianas_por_grupo = X_train.groupby('NRM_label')[numeric_cols].median()
 joblib.dump(medianas_por_grupo, os.path.join(output_dir, 'grouped_medians.pkl'))
 print("Artefacto 'grouped_medians.pkl' guardado.")
 
-# Moda para variables de viento
+# Modas por región para variables de viento categóricas
 cols_viento = ['WindGustDir','WindDir9am','WindDir3pm']
 modas_por_grupo = X_train.groupby('NRM_label')[cols_viento].agg(lambda x: x.mode().iat[0])
 joblib.dump(modas_por_grupo, os.path.join(output_dir, 'grouped_modes.pkl'))
 print("Artefacto 'grouped_modes.pkl' guardado.")
 
-# Preparar datos de entrenamiento para ajustar el Scaler ---
+# Preparar datos de entrenamiento para ajustar el Scaler
 X_train_processed = X_train.copy()
 X_train_processed.loc[X_train_processed['Evaporation'] > 60, 'Evaporation'] = np.nan
 
-# Imputación
+# Imputación numérica por mediana de NRM_label
 for col in numeric_cols:
     X_train_processed[col] = X_train_processed[col].fillna(X_train_processed['NRM_label'].map(medianas_por_grupo[col]))
+# Imputación categórica de viento por moda de NRM_label
 for col in cols_viento:
     X_train_processed[col] = X_train_processed[col].fillna(X_train_processed['NRM_label'].map(modas_por_grupo[col]))
+# Imputación de RainToday faltante en función de la lluvia caída ese día
 X_train_processed.loc[X_train_processed["RainToday"].isna() & (X_train_processed["Rainfall"] >= 1), "RainToday"] = 1
 X_train_processed.loc[X_train_processed["RainToday"].isna(), "RainToday"] = 0
 
-# Codificación Cíclica
+# Codificación Cíclica de direcciones de viento (ángulo -> seno y coseno)
 wind_dir_to_deg = {'N': 0, 'NNE': 22.5, 'NE': 45, 'ENE': 67.5, 'E': 90, 'ESE': 112.5, 'SE': 135, 'SSE': 157.5, 'S': 180, 'SSW': 202.5, 'SW': 225, 'WSW': 247.5, 'W': 270, 'WNW': 292.5, 'NW': 315, 'NNW': 337.5}
 for col in cols_viento:
     X_train_processed[f'{col}_sin'] = np.sin(np.deg2rad(X_train_processed[col].map(wind_dir_to_deg)))
     X_train_processed[f'{col}_cos'] = np.cos(np.deg2rad(X_train_processed[col].map(wind_dir_to_deg)))
 
+# Codificación cíclica de la componente temporal (mes del año)
 X_train_processed['Date'] = pd.to_datetime(X_train_processed['Date'])
 X_train_processed['Month'] = X_train_processed['Date'].dt.month
 X_train_processed['Month_sin'] = np.sin(2 * np.pi * X_train_processed['Month'] / 12)
 X_train_processed['Month_cos'] = np.cos(2 * np.pi * X_train_processed['Month'] / 12)
 
-# One-Hot Encoding
+# One-Hot Encoding para las regiones NRM_label
 X_train_processed = pd.get_dummies(X_train_processed, columns=['NRM_label'], drop_first=True, dtype=int)
 
-# Eliminar columnas que no van al modelo
+# Eliminar columnas que no se usan como características en el modelo final
 cols_to_drop = ['Date', 'Month', 'Location', 'WindGustDir', 'WindDir9am', 'WindDir3pm', 'missing_count']
 X_train_processed.drop(columns=cols_to_drop, inplace=True)
 
-# Asegurar que las columnas están en el orden correcto
+# Definimos el "esquema" final de columnas que usará la red neuronal
+# Para asegurar consistencia entre entrenamiento e inferencia
 final_columns = [
     'MinTemp', 'MaxTemp', 'Rainfall', 'Evaporation', 'Sunshine', 'WindGustSpeed',
     'WindSpeed9am', 'WindSpeed3pm', 'Humidity9am', 'Humidity3pm', 'Pressure9am',
@@ -120,7 +126,8 @@ final_columns = [
     'NRM_label_Southern and South-Western Flatlands', 'NRM_label_Wet Tropics'
 ]
 
-# El get_dummies puede no haber creado todas las columnas si no había ejemplos en el split
+# Si alguna región no aparece en el split de entrenamiento, get_dummies no crea esa columna
+# Acá garantizamos que todas las columnas existan para que el modelo siempre reciba el mismo esquema
 for col in final_columns:
     if col not in X_train_processed.columns:
         X_train_processed[col] = 0
@@ -138,19 +145,24 @@ joblib.dump(final_columns, os.path.join(output_dir, 'final_columns.pkl'))
 print("Artefacto 'final_columns.pkl' guardado.")
 
 
-# Entrenamiento y guardado del modelo de Red Neuronal ---
+# Entrenamiento y guardado del modelo de Red Neuronal
 print("\nIniciando el entrenamiento del modelo de red neuronal...")
 
 
-# Escalar los datos de entrenamiento que ya fueron procesados
+# Escalar los datos de entrenamiento ya procesados
 X_train_scaled = scaler.transform(X_train_final)
 
 # Configuración y compilación del modelo
+# Fijamos semillas para reproducibilidad de resultados
 tf.random.set_seed(42)
 np.random.seed(42)
 
 n_features = X_train_scaled.shape[1]
 
+# Definición de la arquitectura de la red neuronal
+# - Capas densas con ReLU para capturar relaciones no lineales
+# - Dropout para reducir sobreajuste
+# - Salida sigmoide para probabilidad de lluvia (clase positiva)
 model = Sequential([
     Dense(64, activation='relu', input_shape=(n_features,)),
     Dense(32, activation='relu'),
@@ -158,6 +170,7 @@ model = Sequential([
     Dense(1, activation='sigmoid')  
 ])
 
+# Compilación del modelo: Adam, binary_crossentropy, métricas de interés
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
     loss='binary_crossentropy',
@@ -171,6 +184,7 @@ early_stop = EarlyStopping(
     restore_best_weights=True
 )
 
+# Cálculo de class weights para compensar el desbalance de clases
 y_train_int = y_train.astype(int)
 clases = np.unique(y_train_int)
 pesos = compute_class_weight(class_weight='balanced', classes=clases, y=y_train_int)
@@ -187,6 +201,6 @@ history = model.fit(
     verbose=1               
 )
 
-# Guardar el modelo en el directorio raíz
+# Guardar el modelo en el directorio raíz del proyecto
 model.save('mejor_modelo_keras.h5')
 print("\nModelo de red neuronal entrenado y guardado como 'mejor_modelo_keras.h5' en el directorio raíz.")
